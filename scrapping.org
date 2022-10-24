@@ -1,0 +1,408 @@
+* Идея алгоритма
+Заводим папки:
+ - сохраненные скрины + орг-файл, где хранятся ссылки на эти скрины в
+   связке с ссылками на вакансии. 1 файл = 1 вакансия
+ - распарсенные текстовые файлы + ссылка на орг-файл, с ссылками на файлы
+   и ссылками на вакансии
+ - папка с орг-файлом, куда записаны прошедщие через фильтр вакансии с
+   ссылками на них
+
+Алгоритм скраппинга:
+1. Пройти страницу за страницей, сделать скрины: 1 вакансия = 1 скрин +
+   ссылка на вакансию.
+
+- открыть список вакансий
+- определить координаты ссылки на каждую вакансию (ссылки будут на равном
+  расстоянии друг от друга (как найти первую ссылку?)
+- кликнуть на вакансию - откроется в правой части окна
+- сохранить ссылку вакансии (где?)
+- сделать скрин вакансии -> прокрутить вниз -> сделать новый скрин и так
+  до тех пор, пока вакансия не кончится
+- склеить все скрины одной вакансии и сохранить как единый файл вместе с
+  ссылкой
+   - как сохранить файл + ссылку?
+     - возможно вести промежуточный орг, где будет ссылка на файл с
+       вакухой + ссылка на саму вакуху: плюсы - можно посмотреть на
+       промежуточный результат скраппинга, минусы - потом придется
+       парсить файл
+     - аналогично хранить список из конс-пар, где car - это ссылка на
+       сохраненный файл (имя = таймстамп), а cdr - это ссылка на
+       вакансию: плюсы - легче хранить и не придется парсить
+       промежуточный файл, минусы - промежуточные результаты сохранить
+       невозможно
+
+2. Включить распознавание текста через тессеракт. Сохранить промежуточные
+   результаты в читаемом виде: текст вакансии + ссылка на нее.
+
+   - парсится орг-файл ссылками на скрин вакансии + ссылка на вакансию.
+   - текст вакансии пишется в файл txt, ссылка на файл сохраняется в
+     орг-файле + ссылка на вакансию
+
+3. Грепнуть весь текст вакансий через заданный фильтр - в случае если
+   вакансия подходит, запистаь ее в орг-файл
+
+* Скраппинг
+
+#+NAME: define_displays
+#+BEGIN_SRC lisp
+  (ql:quickload "clx")
+  (ql:quickload "zpng")
+  (ql:quickload "png-read")
+
+  (defmacro with-display (host (display screen root-window) &body body)
+    `(let* ((,display (xlib:open-display ,host))
+            (,screen (first (xlib:display-roots ,display)))
+            (,root-window (xlib:screen-root ,screen)))
+       (unwind-protect (progn ,@body)
+         (xlib:close-display ,display))))
+
+  (defmacro with-default-display ((display &key (force nil)) &body body)
+    `(let ((,display (xlib:open-default-display)))
+       (unwind-protect
+            (unwind-protect
+                 ,@body
+              (when ,force
+                (xlib:display-force-output ,display)))
+         (xlib:close-display ,display))))
+
+  (defmacro with-default-display-force ((display) &body body)
+    `(with-default-display (,display :force t) ,@body))
+
+  (defmacro with-default-screen ((screen) &body body)
+    (let ((display (gensym)))
+      `(with-default-display (,display)
+         (let ((,screen (xlib:display-default-screen ,display)))
+           ,@body))))
+
+  (defmacro with-default-window ((window) &body body)
+    (let ((screen (gensym)))
+      `(with-default-screen (,screen)
+         (let ((,window (xlib:screen-root ,screen)))
+           ,@body))))
+
+  (defun x-size ()
+    (with-default-screen (s)
+      (values
+       (xlib:screen-width s)
+       (xlib:screen-height s))))
+
+#+END_SRC
+
+Координаты, по которым располагается описание вакансий у меня
+[[TODO:gmm]] как сделать распознавание этой области автоматическим, без
+ручного введения ккординат?
+
+#+NAME: define_coordinates
+#+BEGIN_SRC lisp
+  (defparameter *default-x* 274)
+  (defparameter *default-y* 903)
+  (defparameter *default-width* (- 1842 903))
+  (defparameter *default-heght* (1070 - 274))
+
+#+END_SRC
+
+Инфраструктура:
+- создание скриншота
+- сохранение скриншота в png по заданному пути
+- загрузка png -> на выходе получаем массив пикселей
+- превращение цветного изображения в черно-белое
+
+#+NAME: png_preparing
+#+BEGIN_SRC lisp
+  (defun raw-image->png (data width height)
+    (let* ((png (make-instance 'zpng:png :width width :height height
+                               :color-type :truecolor-alpha
+                               :image-data data))
+           (data (zpng:data-array png)))
+      (dotimes (y height)
+        (dotimes (x width)
+          ;; BGR -> RGB, ref code: https://goo.gl/slubfW
+          ;; diffs between RGB and BGR: https://goo.gl/si1Ft5
+          (rotatef (aref data y x 0) (aref data y x 2))
+          (setf (aref data y x 3) 255)))
+      png))
+
+  (multiple-value-bind (default-width default-height) (x-size)
+    (defun x-snapshot (&key (x *default-x*) (y *default-y*)
+                         (width  *default-width*) (height *default-heght*)
+                         path)
+      ;; "Return RGB data array (The dimensions correspond to the height, width,
+      ;; and pixel components, see comments in x-snapsearch for more details),
+      ;; or write to file (PNG only), depend on if you provide the path keyword"
+      (with-default-window (w)
+        (let ((image
+               (raw-image->png
+                (xlib:get-raw-image w :x x :y y
+                                    :width width :height height
+                                    :format :z-pixmap)
+                width height)))
+          (if path
+              (let* ((ext (pathname-type path))
+                     (path
+                      (if ext
+                          path
+                          (concatenate 'string path ".png")))
+                     (png? (or (null ext) (equal ext "png"))))
+                (cond
+                  (png? (zpng:write-png image path))
+                  (t (error "Only PNG file is supported"))))
+              (zpng:data-array image))))))
+
+  ;; ;; TEST: save screenshot
+  ;; (x-snapshot :path "~/Pictures/snap1.png")
+
+
+  ;; Ошибка, возникающая когда мы пытаемся прочитать png
+  ;; в котором неизвестно сколько байт на точку
+  (define-condition unk-png-color-type (error)
+    ((color :initarg :color :reader color))
+    (:report
+     (lambda (condition stream)
+       (format stream "Error in LOAD-PNG: unknown color type: ~A"
+               (color condition)))))
+
+  (defun load-png (pathname-str)
+    "Возвращает массив size-X столбцов по size-Y точек,
+     где столбцы идут слева-направо, а точки в них - сверху-вниз
+     ----
+     В zpng есть указание на возможные варианты COLOR:
+     ----
+           (defmethod samples-per-pixel (png)
+             (ecase (color-type png)
+               (:grayscale 1)
+               (:truecolor 3)
+               (:indexed-color 1)
+               (:grayscale-alpha 2)
+               (:truecolor-alpha 4)))
+    "
+    (let* ((png (png-read:read-png-file pathname-str))
+           (image-data (png-read:image-data png))
+           (color (png-read:colour-type png))
+           (dims (cond ((or (equal color :truecolor-alpha)
+                            (equal color :truecolor))
+                        (list (array-dimension image-data 1)
+                              (array-dimension image-data 0)
+                              (array-dimension image-data 2)))
+                       ((or (equal color :grayscale)
+                            (equal color :greyscale))
+                        (list (array-dimension image-data 1)
+                              (array-dimension image-data 0)))
+                       (t (error 'unk-png-color-type :color color))))
+           (result ;; меняем размерности X и Y местами
+            (make-array dims :element-type '(unsigned-byte 8))))
+      ;; (format t "~% new-arr ~A "(array-dimensions result))
+      ;; ширина, высота, цвет => высота, ширина, цвет
+      (macrolet ((cycle (&body body)
+                   `(do ((y 0 (incf y)))
+                        ((= y (array-dimension result 0)))
+                      (do ((x 0 (incf x)))
+                          ((= x (array-dimension result 1)))
+                        ,@body))))
+        (cond ((or (equal color :truecolor-alpha)
+                   (equal color :truecolor))
+               (cycle (do ((z 0 (incf z)))
+                          ((= z (array-dimension result 2)))
+                        (setf (aref result y x z)
+                              (aref image-data x y z)))))
+              ((or (equal color :grayscale)
+                   (equal color :greyscale))
+               (cycle (setf (aref result y x)
+                            (aref image-data x y))))
+              (t (error 'unk-png-color-type :color color)))
+        result)))
+
+  ;; ;; TEST: equality screenshot and load-file-data
+  ;; (assert (equalp (progn
+  ;;                   (x-snapshot :path "~/Pictures/snap2.png")
+  ;;                   (load-png "~/Pictures/snap2.png"))
+  ;;                 (x-snapshot)))
+
+
+  (defun save-png (width height pathname-str image
+                   &optional (color-type :truecolor-alpha))
+    (let* ((png (make-instance 'zpng:png :width width :height height
+                               :color-type color-type))
+           (vector (make-array ;; displaced vector - need copy for save
+                    (* height width (zpng:samples-per-pixel png))
+                    :displaced-to image :element-type '(unsigned-byte 8))))
+      ;; Тут применен потенциально опасный трюк, когда мы создаем
+      ;; объект PNG без данных, а потом добавляем в него данные,
+      ;; используя неэкспортируемый writer.
+      ;; Это нужно чтобы получить третью размерность массива,
+      ;; который мы хотим передать как данные и при этом
+      ;; избежать создания для этого временного объекта
+      (setf (zpng::%image-data png) (copy-seq vector))
+      (zpng:write-png png pathname-str)))
+
+
+  ;; ;; TEST: saving loaded data
+  ;; (let* ((from "~/Pictures/snap2.png")
+  ;;        (to   "~/Pictures/snap3.png")
+  ;;        (image-data (load-png from)))
+  ;;   (destructuring-bind (height width depth)
+  ;;       (array-dimensions image-data)
+  ;;     (save-png width height to image-data)))
+
+  ;; ;; TEST: saving screenshot data
+  ;; (let* ((to   "~/Pictures/snap4.png")
+  ;;        (image-data (x-snapshot)))
+  ;;   (destructuring-bind (height width depth)
+  ;;       (array-dimensions image-data)
+  ;;     (save-png width height to image-data)))
+
+
+  ;; превращает цветное изображение в черно-белое
+  (defun binarization (image &optional threshold)
+    (let* ((dims (array-dimensions image))
+           (new-dims (cond ((equal 3 (length dims))  (butlast dims))
+                           ((equal 2 (length dims))  dims)
+                           (t (error 'binarization-error))))
+           (result (make-array new-dims :element-type '(unsigned-byte 8))))
+      (macrolet ((cycle (&body body)
+                   `(do ((y 0 (incf y)))
+                        ((= y (array-dimension image 0)))
+                      (do ((x 0 (incf x)))
+                          ((= x (array-dimension image 1)))
+                        ,@body))))
+        (cond ((equal 3 (length dims))
+               (cycle (do ((z 0 (incf z)))
+                          ((= z (array-dimension image 2)))
+                        (let ((avg (floor (+ (aref image y x 0)
+                                             (aref image y x 1)
+                                             (aref image y x 2))
+                                          3)))
+                          (when threshold
+                            (if (< threshold avg)
+                                (setf avg 255)
+                                (setf avg 0)))
+                          (setf (aref result y x) avg)))))
+              ((equal 2 (length dims))
+               (cycle (let ((avg (aref image y x)))
+                        (when threshold
+                          (if (< threshold avg)
+                              (setf avg 255)
+                              (setf avg 0)))
+                        (setf (aref result y x) avg))))
+              (t (error 'binarization-error))))
+      result))
+
+  ;; ;; TEST: load file and translate it to grayscale and save
+  ;; (let* ((from "~/Pictures/snap4.png")
+  ;;        (to   "~/Pictures/snap5.png")
+  ;;        (image-data (binarization (load-png from))))
+  ;;   (destructuring-bind (height width) ;; NB: no depth!
+  ;;       (array-dimensions image-data)
+  ;;     (save-png width height to image-data :grayscale))) ;; NB: grayscale!
+
+
+  ;; ;; TEST: binarize and save screenshot
+  ;; (let* ((to   "~/Pictures/snap6.png")
+  ;;        (image-data (binarization (x-snapshot) 127))) ;; NEW: threshold!
+  ;;   (destructuring-bind (height width) ;; NB: no depth!
+  ;;       (array-dimensions image-data)
+  ;;     (save-png width height to image-data :grayscale))) ;; NB: grayscale!
+
+  ;; ;; TEST: try to load grayscale image and save it
+  ;; (let* ((from "~/Pictures/snap6.png")
+  ;;        (to   "~/Pictures/snap7.png")
+  ;;        (image-data (load-png from)))
+  ;;   (destructuring-bind (height width)
+  ;;       (array-dimensions image-data)
+  ;;     (save-png width height to image-data :grayscale)))
+
+  ;; ;; TEST: try to load grayscale image, binarize and save it
+  ;; (let* ((from "~/Pictures/snap7.png")
+  ;;        (to   "~/Pictures/snap8.png")
+  ;;        (image-data (binarization (load-png from) 127)))
+  ;;   (destructuring-bind (height width) ;; NB: no depth!
+  ;;       (array-dimensions image-data)
+  ;;     (save-png width height to image-data :grayscale)))
+#+END_SRC
+
+
+Эмкляция нажатия клавиш и движения мышкой.
+Честно стащено отсюда https://github.com/0xBECEDA/cl-dino/blob/master/cl-autogui.lisp
+
+#+NAME: keyboard_simulation
+#+BEGIN_SRC lisp
+  (defun mklist (obj)
+    (if (and
+         (listp obj)
+         (not (null obj)))
+        obj (list obj)))
+
+  (defmacro defun-with-actions (name params actions &body body)
+    "This macro defun a function which witch do mouse or keyboard actions,
+  body is called on each action."
+    `(defun ,name ,params
+       (mapcar
+        #'(lambda (action)
+            ,@body)
+        (mklist ,actions))))
+
+  (defun perform-mouse-action (press? button &key x y)
+    (and x y (x-move x y))
+    (with-default-display-force (d)
+      (xlib/xtest:fake-button-event d button press?)))
+
+  (macrolet ((def (name actions)
+               `(defun-with-actions ,name
+                    (&key (button 1) x y)
+                    ,actions
+                  (funcall #'perform-mouse-action
+                           action button :x x :y y))))
+    (def x-mouse-down t)
+    (def x-mouse-up nil)
+    (def x-click '(t nil))
+    (def x-dbclick '(t nil t nil)))
+
+  (defmacro with-scroll (pos neg clicks x y)
+    `(let ((button (cond
+                     ((= 0 ,clicks) nil)
+                     ((> 0 ,clicks) ,pos) ; scroll up/right
+                     ((< 0 ,clicks) ,neg)))) ; scroll down/left
+       (dotimes (_ (abs ,clicks))
+         (x-click :button button :x ,x :y ,y))))
+
+  (defun x-vscroll (clicks &key x y)
+    (with-scroll 4 5 clicks x y))
+
+  (defun x-scroll (clicks &key x y)
+    (x-vscroll clicks :x x :y y))
+
+  (defun x-hscroll (clicks &key x y)
+    (with-scroll 7 6 clicks x y))
+
+  (defun perform-key-action (press? keycode) ; use xev to get keycode
+    (with-default-display-force (d)
+      (xlib/xtest:fake-key-event d keycode press?)))
+
+  (macrolet ((def (name actions)
+               `(defun-with-actions ,name (keycode)
+                    ,actions
+                  (funcall #'perform-key-action
+                           action keycode))))
+    (def x-key-down t)
+    (def x-key-up nil)
+    (def x-press '(t nil)))
+
+#+END_SRC
+
+Эмуляция ивентов мышкой и клавой:
+- эмуляция клика
+- эмуляция копипасты
+- эмуляция скроллинга
+-------------------------------------
+- открыть окно браузера
+- кликнуть на первую вакансию
+- сделать скрин правой области экрана (там вакансия) -> прокрутить правую
+  область вниз (как? пэйдждаун не работает)-> сделать скрин
+
+* Tangle
+   #+NAME: recognition
+   #+BEGIN_SRC lisp :tangle code-file.lisp :noweb yes tangle :exports code :padline no :comments none
+     <<define_displays>>
+     <<define_coordinates>>
+     <<png_preparing>>
+     <<keyboard_simulation>>
+   #+END_SRC

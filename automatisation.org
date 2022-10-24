@@ -1,0 +1,116 @@
+* Company1
+:PROPERTIES:
+    :Salary:  120
+    :Status:  offer
+    :Link: http://some-link
+    :Notices:  Какая-то кампания
+    :Deadline: <2021-07-03 00:00:00>
+    :END:
+
+* Company2
+:PROPERTIES:
+    :Salary:  150
+    :Status:  refuse
+    :Link: http://some_other_link
+    :Deadline: <2020-07-03 01:00:00>
+    :Notices: some notices
+    :END:
+
+
+* Company3
+:PROPERTIES:
+    :Salary:  150
+    :Status:  offer
+    :Link: http://some_other_link
+    :Deadline: <2020-08-03 02:00:00>
+    :Notices: some notices
+    :END:
+
+
+#+begin_src emacs-lisp :results table
+  (require 'parse-time)
+  (require 'subr-x)
+
+  ;; последовательно получает все проперти (будущие колонки таблицы), указанные в prop-list, из хедера
+  (defun get-colums (hl prop-list)
+    (map 'list #'(lambda (prop)
+                   (org-element-property prop hl))
+         prop-list))
+
+  ;; форматирует дату под формат, который позволит сравнивать 2 даты
+  (defun format-date (date-string)
+    (setf date-string (string-remove-suffix
+                       ">" (string-remove-prefix "<" date-string)))
+    (multiple-value-bind (sec min hour day month year dow tz dst)
+        (parse-time-string date-string)
+      (let ((sec-val (cond ((or (not sec) (= sec 0)) (format "00"))
+                           ((>= sec 10) (format "%d" sec))
+                           ((< sec 10) (format "0%d" sec))))
+            (min-val (cond ((or (not min) (= min  0)) (format "00"))
+                           ((>= min 10) (format "%d" min))
+                           ((< min 10) (format "0%d" min))))
+            (hour-val (cond ((or (not hour) (= hour 0)) (format "00"))
+                            ((>= hour 10) (format "%d" hour))
+                            ((< hour 10) (format "0%d" hour))))
+            (day-val (cond ((or (not day )(= day  0)) (format "00"))
+                           ((>= day 10) (format "%d" day))
+                           ((< day 10) (format "0%d" day))))
+            (month-val (cond ((or (not month) (= month  0)) (format "00"))
+                             ((>= month 10) (format "%d" month))
+                             ((< month 10) (format "0%d" month)))))
+        (format "%s-%s-%s %s:%s:%s" year month-val day-val hour-val min-val sec-val))))
+
+  ;;(format-date "2020-07-03 00:00:00")
+  ;;(format-date "< 2022-07-03 00:00:00")
+  ;;(format-date "<2020-07-03>")
+
+  ;; фильтрует по статусу
+  (defun status-filter (hl expected prop-list)
+    (let ((status (org-element-property :STATUS hl)))
+      (if (equal status expected)
+          (get-colums hl prop-list))))
+
+  ;; фильтрует по дедлайну - дедлайн должен быть позже заданного
+  (defun is-deadline-after (hl expected-deadline prop-list)
+    (let ((fmt-deadline (if (org-element-property :DEADLINE hl)
+                            (format-date (org-element-property :DEADLINE hl))))
+          (fmt-expected-deadline (format-date expected-deadline)))
+      (if (and fmt-deadline (not (time-less-p (date-to-time fmt-deadline)
+                                              (date-to-time fmt-expected-deadline))))
+          (get-colums hl prop-list))))
+
+
+  ;; фильтрует по дедлайну - дедлайн должен быть раньше заданного
+  (defun is-defore-before (hl expected-deadline prop-list)
+    (let ((fmt-deadline (if (org-element-property :DEADLINE hl)
+                            (format-date (org-element-property :DEADLINE hl))))
+          (fmt-expected-deadline (format-date expected-deadline)))
+      (if (and fmt-deadline (time-less-p (date-to-time fmt-deadline)
+                                         (date-to-time fmt-expected-deadline)))
+          (get-colums hl prop-list))))
+
+  ;; фильтр по зп - зп должна быть >= указанной (пока без учета валюты)
+  (defun salary-filter (hl expected prop-list)
+    (let ((salary (org-element-property :SALARY hl)))
+      (if (>= (string-to-number salary) expected)
+          (get-colums hl prop-list))))
+
+  (defun make-table (fn expected-value prop-list)
+    (let ((parsetree (org-element-parse-buffer 'headline)))
+      (append (list prop-list)
+      (org-element-map parsetree 'headline
+        (lambda (hl)
+          (funcall fn hl expected-value prop-list))))))
+
+
+  ;; (make-table #'is-deadline-before "2010-07-03 00:00:00" '(:title :STATUS :SALARY)) -> nil
+  ;; (make-table #'is-deadline-after "2010-07-03 00:00:00" '(:title :STATUS :SALARY))
+  ;; (make-table #'status-filter "offer" '(:title :STATUS))
+  ;; (make-table #'salary-filter 130 '(:title :STATUS :SALARY))
+#+end_src
+
+#+results:
+| :title   | :STATUS | :SALARY |
+| Company2 | refuse  |     150 |
+| Company3 | offer   |     150 |
+|          |         |         |
