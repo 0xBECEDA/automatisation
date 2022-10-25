@@ -42,7 +42,7 @@
 (defparameter *default-x* 274)
 (defparameter *default-y* 903)
 (defparameter *default-width* (- 1842 903))
-(defparameter *default-heght* (1070 - 274))
+(defparameter *default-heght* (- 1070 274))
 
 (defun raw-image->png (data width height)
   (let* ((png (make-instance 'zpng:png :width width :height height
@@ -144,8 +144,8 @@
              (cycle (setf (aref result y x)
                           (aref image-data x y))))
             (t (error 'unk-png-color-type :color color)))
-      result)))
-
+      result))
+)
 ;; ;; TEST: equality screenshot and load-file-data
 ;; (assert (equalp (progn
 ;;                   (x-snapshot :path "~/Pictures/snap2.png")
@@ -267,6 +267,12 @@ body is called on each action."
           ,@body)
       (mklist ,actions))))
 
+(defun x-move (x y)
+  (if (and (integerp x) (integerp y))
+      (with-default-display-force (d)
+        (xlib/xtest:fake-motion-event d x y))
+      (error "Integer only for position, (x: ~S, y: ~S)" x y)))
+
 (defun perform-mouse-action (press? button &key x y)
   (and x y (x-move x y))
   (with-default-display-force (d)
@@ -274,6 +280,7 @@ body is called on each action."
 
 (macrolet ((def (name actions)
              `(defun-with-actions ,name
+                  ;; у меня клик левой кнопкой мыши - это button 1
                   (&key (button 1) x y)
                   ,actions
                 (funcall #'perform-mouse-action
@@ -312,3 +319,16 @@ body is called on each action."
   (def x-key-down t)
   (def x-key-up nil)
   (def x-press '(t nil)))
+
+(defparameter *default-browser-x* 35)
+(defparameter *default-browser-y* 75)
+
+;;(defun open-browser()
+;;  (x-mouse-down :x *default-browser-x* :y *default-browser-y*)
+;;  (sleep 0.01)
+;;  (x-mouse-up :x *default-browser-x* :y *default-browser-y*))
+
+(defun open-browser()
+  (x-click :x *default-browser-x* :y *default-browser-y*))
+
+(open-browser)

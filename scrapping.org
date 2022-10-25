@@ -97,7 +97,7 @@
   (defparameter *default-x* 274)
   (defparameter *default-y* 903)
   (defparameter *default-width* (- 1842 903))
-  (defparameter *default-heght* (1070 - 274))
+  (defparameter *default-heght* (- 1070 274))
 
 #+END_SRC
 
@@ -209,8 +209,8 @@
                (cycle (setf (aref result y x)
                             (aref image-data x y))))
               (t (error 'unk-png-color-type :color color)))
-        result)))
-
+        result))
+  )
   ;; ;; TEST: equality screenshot and load-file-data
   ;; (assert (equalp (progn
   ;;                   (x-snapshot :path "~/Pictures/snap2.png")
@@ -319,9 +319,17 @@
   ;;     (save-png width height to image-data :grayscale)))
 #+END_SRC
 
-
-Эмкляция нажатия клавиш и движения мышкой.
+** Эмуляция нажатия клавиш и движения мышкой
 Честно стащено отсюда https://github.com/0xBECEDA/cl-dino/blob/master/cl-autogui.lisp
+
+Клаиватурные коды могут отличаться.
+Чтоб узнать свои для linux ubuntu можно использовать:
+https://www.geeksforgeeks.org/showkey-command-in-linux-with-examples/
+http://xahlee.info/linux/linux_x11_mouse_button_number.html
+#+BEGIN_SRC bash
+  sudo showkey # показывает коды клавы
+  xev # показывает коды кнопок мыши
+#+END_SRC
 
 #+NAME: keyboard_simulation
 #+BEGIN_SRC lisp
@@ -340,6 +348,12 @@
             ,@body)
         (mklist ,actions))))
 
+  (defun x-move (x y)
+    (if (and (integerp x) (integerp y))
+        (with-default-display-force (d)
+          (xlib/xtest:fake-motion-event d x y))
+        (error "Integer only for position, (x: ~S, y: ~S)" x y)))
+
   (defun perform-mouse-action (press? button &key x y)
     (and x y (x-move x y))
     (with-default-display-force (d)
@@ -347,6 +361,7 @@
 
   (macrolet ((def (name actions)
                `(defun-with-actions ,name
+                    ;; у меня клик левой кнопкой мыши - это button 1
                     (&key (button 1) x y)
                     ,actions
                   (funcall #'perform-mouse-action
@@ -388,15 +403,52 @@
 
 #+END_SRC
 
-Эмуляция ивентов мышкой и клавой:
-- эмуляция клика
-- эмуляция копипасты
-- эмуляция скроллинга
--------------------------------------
+** Скраппинг + текущая проблема
+План работ:
 - открыть окно браузера
 - кликнуть на первую вакансию
 - сделать скрин правой области экрана (там вакансия) -> прокрутить правую
-  область вниз (как? пэйдждаун не работает)-> сделать скрин
+  область вниз -> сделать скрин
+
+Представлены 2 варианта открытия оконки браузера, которые должны работать
+идентичным образом.
+Ожидаемое поведение:
+- проиcходит эмуляция клика левой кнопкой мыши на заданных
+  координатах. Браузер открывается (не новое окно, а то, что уже было
+  открыто)
+
+Текущее поведение:
+- открывается меню браузера (выйти их всех окон, просмотреть окна и т.д.) или
+- открывается новое окно в браузере
+
+Гипотезы:
+- левый клик мыши в моем случае - это не button 1. Не подтвердилось. Чтоб
+  узнать, какой код какому событию мыши/клавиатуры соответствует, см [[%D0%AD%D0%BC%D1%83%D0%BB%D1%8F%D1%86%D0%B8%D1%8F %D0%BD%D0%B0%D0%B6%D0%B0%D1%82%D0%B8%D1%8F %D0%BA%D0%BB%D0%B0%D0%B2%D0%B8%D1%88 %D0%B8 %D0%B4%D0%B2%D0%B8%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F %D0%BC%D1%8B%D1%88%D0%BA%D0%BE%D0%B9][сюда]]
+- событие происходит так быстро, что обрабатывается неправильно - не
+  подтвердилось, см закомментированный вариант open-browser
+- у меня сбиты настройки - гипотеза проверяется. Материалы с похожей
+  проблемой:
+https://superuser.com/questions/1590467/clickpad-left-click-not-working-on-ubuntu-20-04-when-touchpad-is-not-touched
+https://askubuntu.com/questions/1274816/mouse-frequently-does-effect-of-right-click-when-i-do-single-left-click-on-ubunt
+https://askubuntu.com/questions/1271281/dell-precision-7550-physical-mouse-buttons-behaving-like-clickpad
+
+
+#+NAME: open_browser
+#+BEGIN_SRC lisp
+  ;; координаты иконки браузера у меня
+  (defparameter *default-browser-x* 35)
+  (defparameter *default-browser-y* 75)
+
+  ;;(defun open-browser()
+  ;;  (x-mouse-down :x *default-browser-x* :y *default-browser-y*)
+  ;;  (sleep 0.01)
+  ;;  (x-mouse-up :x *default-browser-x* :y *default-browser-y*))
+
+  (defun open-browser()
+    (x-click :x *default-browser-x* :y *default-browser-y*))
+
+  ;; (open-browser)
+#+END_SRC
 
 * Tangle
    #+NAME: recognition
@@ -405,4 +457,10 @@
      <<define_coordinates>>
      <<png_preparing>>
      <<keyboard_simulation>>
+     <<open_browser>>
    #+END_SRC
+
+* Как это запустить
+- станглить - получится code-file.lisp
+- залить весь код в репл
+- выполнить ~(open-browser)~ - описани проблемы с гипотезами и ссылками [[%D0%A1%D0%BA%D1%80%D0%B0%D0%BF%D0%BF%D0%B8%D0%BD%D0%B3 + %D1%82%D0%B5%D0%BA%D1%83%D1%89%D0%B0%D1%8F %D0%BF%D1%80%D0%BE%D0%B1%D0%BB%D0%B5%D0%BC%D0%B0][сюда]]
