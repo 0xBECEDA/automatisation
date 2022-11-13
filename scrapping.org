@@ -1,90 +1,60 @@
-* Идея алгоритма
-Заводим папки:
- - сохраненные скрины + орг-файл, где хранятся ссылки на эти скрины в
-   связке с ссылками на вакансии. 1 файл = 1 вакансия
- - распарсенные текстовые файлы + ссылка на орг-файл, с ссылками на файлы
-   и ссылками на вакансии
- - папка с орг-файлом, куда записаны прошедщие через фильтр вакансии с
-   ссылками на них
+* Алгоритм
+Цель: получить на выходе описание вакансии + ссылку на нее
 
-Алгоритм скраппинга:
-1. Пройти страницу за страницей, сделать скрины: 1 вакансия = 1 скрин +
-   ссылка на вакансию.
+** Пререквизиты
+- включить тридактил для файрфокса
+- включить в нем hint mode
+- определить цвет границ блоков в гимпе
 
-- открыть список вакансий
-- определить координаты ссылки на каждую вакансию (ссылки будут на равном
-  расстоянии друг от друга (как найти первую ссылку?)
-- кликнуть на вакансию - откроется в правой части окна
-- сохранить ссылку вакансии (где?)
-- сделать скрин вакансии -> прокрутить вниз -> сделать новый скрин и так
-  до тех пор, пока вакансия не кончится
-- склеить все скрины одной вакансии и сохранить как единый файл вместе с
-  ссылкой
-   - как сохранить файл + ссылку?
-     - возможно вести промежуточный орг, где будет ссылка на файл с
-       вакухой + ссылка на саму вакуху: плюсы - можно посмотреть на
-       промежуточный результат скраппинга, минусы - потом придется
-       парсить файл
-     - аналогично хранить список из конс-пар, где car - это ссылка на
-       сохраненный файл (имя = таймстамп), а cdr - это ссылка на
-       вакансию: плюсы - легче хранить и не придется парсить
-       промежуточный файл, минусы - промежуточные результаты сохранить
-       невозможно
-
-2. Включить распознавание текста через тессеракт. Сохранить промежуточные
-   результаты в читаемом виде: текст вакансии + ссылка на нее.
-
-   - парсится орг-файл ссылками на скрин вакансии + ссылка на вакансию.
-   - текст вакансии пишется в файл txt, ссылка на файл сохраняется в
-     орг-файле + ссылка на вакансию
-
-3. Грепнуть весь текст вакансий через заданный фильтр - в случае если
-   вакансия подходит, запистаь ее в орг-файл
-
-* Скраппинг
-
-#+NAME: define_displays
-#+BEGIN_SRC lisp
+** Библиотеки
+#+NAME: libraries
+#+BEGIN_SRC lisp :noweb yes
   (ql:quickload "clx")
   (ql:quickload "zpng")
   (ql:quickload "png-read")
+  (ql:quickload "local-time")
 
-  (defmacro with-display (host (display screen root-window) &body body)
-    `(let* ((,display (xlib:open-display ,host))
-            (,screen (first (xlib:display-roots ,display)))
-            (,root-window (xlib:screen-root ,screen)))
-       (unwind-protect (progn ,@body)
-         (xlib:close-display ,display))))
+#+END_SRC
 
-  (defmacro with-default-display ((display &key (force nil)) &body body)
-    `(let ((,display (xlib:open-default-display)))
-       (unwind-protect
-            (unwind-protect
-                 ,@body
-              (when ,force
-                (xlib:display-force-output ,display)))
-         (xlib:close-display ,display))))
+** Скраппинг
+#+NAME: define_displays
+#+BEGIN_SRC lisp
+    (defmacro with-display (host (display screen root-window) &body body)
+      `(let* ((,display (xlib:open-display ,host))
+              (,screen (first (xlib:display-roots ,display)))
+              (,root-window (xlib:screen-root ,screen)))
+         (unwind-protect (progn ,@body)
+           (xlib:close-display ,display))))
 
-  (defmacro with-default-display-force ((display) &body body)
-    `(with-default-display (,display :force t) ,@body))
+    (defmacro with-default-display ((display &key (force nil)) &body body)
+      `(let ((,display (xlib:open-default-display)))
+         (unwind-protect
+              (unwind-protect
+                   ,@body
+                (when ,force
+                  (xlib:display-force-output ,display)))
+           (xlib:close-display ,display))))
 
-  (defmacro with-default-screen ((screen) &body body)
-    (let ((display (gensym)))
-      `(with-default-display (,display)
-         (let ((,screen (xlib:display-default-screen ,display)))
-           ,@body))))
+    (defmacro with-default-display-force ((display) &body body)
+      `(with-default-display (,display :force t) ,@body))
 
-  (defmacro with-default-window ((window) &body body)
-    (let ((screen (gensym)))
-      `(with-default-screen (,screen)
-         (let ((,window (xlib:screen-root ,screen)))
-           ,@body))))
+    (defmacro with-default-screen ((screen) &body body)
+      (let ((display (gensym)))
+        `(with-default-display (,display)
+           (let ((,screen (xlib:display-default-screen ,display)))
+             ,@body))))
 
-  (defun x-size ()
-    (with-default-screen (s)
-      (values
-       (xlib:screen-width s)
-       (xlib:screen-height s))))
+    (defmacro with-default-window ((window) &body body)
+      (let ((screen (gensym)))
+        `(with-default-screen (,screen)
+           (let ((,window (xlib:screen-root ,screen)))
+             ,@body))))
+
+    (defun x-size ()
+      (with-default-screen (s)
+        (values
+         (xlib:screen-width s)
+         (xlib:screen-height s))))
 
 #+END_SRC
 
@@ -319,6 +289,190 @@
   ;;     (save-png width height to image-data :grayscale)))
 #+END_SRC
 
+** START Сегментация
+Известно, что:
+- подсказки тридактила - это всегда квадратики с офоном определнного
+  цвета и двумя белыми буквами на нем
+
+- блоки с названиями вакансия - это всегда длинные прямоугольники разного
+  размера в заивисимости от масштаба
+
+- границы блоков всегда одного цвета
+
+Список правил:
+- экран разделяется линией, которая идет сверху вниз и имеет длину 2/3
+  высоты экрана
+
+- названия вакансий - это:
+  - прямоугольные блоки
+  - находятся левее разделительной линии, но не выше нее
+  - крупнее относительно других блоков (кроме того, что находится самым
+    первым, это название списка вакансий типа "golang developer United
+    States)
+
+- название более подробно рассматриваемой вакансии (предпосмотр вакансии
+  среди списка)
+  - это крупный прямоугольный блок
+  - находится справа от разделительной линии
+  - находится вверху разделительной линии
+
+Необходимо реализовать:
+ - предикат, определяющий, является ли область прямоугольником (на вход
+   принимает координаты левого ниженго угла и правого верхнего)
+
+ - функцию, которая ищет разделительную линию (начинается снизу экрана,
+   занимает более 2/3 высоты экрана)
+
+ - функцию, которая вычисляет площадь двух прямоугольников и определяет,
+   явялется ли первый прямоугольник больше второго. Обе фигуры должны
+   быть прямоугольниками.
+
+*** DONE rectangle?
+Предикат, определяющий, является ли область прямоугольником (на вход принимает координаты левого ниженго угла и правого верхнего)
+#+NAME: is_it_rectangle
+#+BEGIN_SRC lisp :noweb yes
+  (defun rectangle? (coordinates)
+    (if (or (atom coordinates)
+            (or (atom (car coordinates))
+                (atom (cdr coordinates))))
+        nil
+        (let* ((down-left-x (caar coordinates))
+               (down-left-y (cdar coordinates))
+               (upper-right-x (caadr coordinates))
+               (upper-right-y (cdadr coordinates))
+               (hight (- upper-right-y down-left-y))
+               (length (- upper-right-x down-left-x)))
+          ;; мы считаем прямоугольником только фигуру, у которой
+          ;; длина значительно (в 1.5) превышает высоту (но при этом не является
+          ;; горизонтальной линией)
+          (and (> hight 0) (> length (* hight 1.5))))))
+
+  (defun test-rectangle?()
+    (let ((test-line (list (cons 1 1) (cons 1 100)))
+          (test-line2 (list (cons 1 1) (cons 100 1)))
+          (test-square (list (cons 1 1) (cons 10 10)))
+          (test-rectangle (list (cons 1 1) (cons 100 10))))
+      (assert (equal (rectangle? test-line) nil))
+      (assert (equal (rectangle? test-line2) nil))
+      (assert (equal (rectangle? test-square) nil))
+      (assert (equal (rectangle? (cons 1 2)) nil))
+      (assert (equal (rectangle? '()) nil))
+      (assert (equal (rectangle? nil) nil))
+      (assert (equal (rectangle? test-rectangle) t))))
+
+  ;; (test-rectangle?)
+
+
+  <<is_it_bigger_rectangle>>
+#+END_SRC
+
+*** DONE bigger-rectangle?
+Предикат, который вычисляет площадь двух прямоугольников и определяет,
+явялется ли первый прямоугольник больше второго. Обе фигуры должны
+быть прямоугольниками.
+#+NAME: is_it_bigger_rectangle
+#+BEGIN_SRC lisp :noweb yes
+  (defun bigger-rectangle? (coordinates1 coordinates2)
+    (if (or (not (rectangle? coordinates1))
+            (not (rectangle? coordinates2)))
+        nil
+        (let* ((down-left-x1 (caar coordinates1))
+               (down-left-y1 (cdar coordinates1))
+               (upper-right-x1 (caadr coordinates1))
+               (upper-right-y1 (cdadr coordinates1))
+               (down-left-x2 (caar coordinates2))
+               (down-left-y2 (cdar coordinates2))
+               (upper-right-x2 (caadr coordinates2))
+               (upper-right-y2 (cdadr coordinates2))
+               (hight1 (- upper-right-y1 down-left-y1))
+               (length1 (- upper-right-x1 down-left-x1))
+               (hight2 (- upper-right-y2 down-left-y2))
+               (length2 (- upper-right-x2 down-left-x2)))
+          (> (* hight1 length1) (* hight2 length2)))))
+
+  (defun test-bigger-rectangle?()
+    (let ((test-rectangle-bigger (list (cons 1 1) (cons 100 10)))
+          (test-rectangle-smaller (list (cons 1 1) (cons 50 10)))
+          (test-line (list (cons 1 1) (cons 1 100)))
+          (test-line2 (list (cons 1 1) (cons 100 1))))
+      (assert (equal (bigger-rectangle? test-rectangle-bigger test-line) nil))
+      (assert (equal (bigger-rectangle? test-rectangle-bigger test-line2) nil))
+      (assert (equal (bigger-rectangle? test-rectangle-smaller test-rectangle-bigger) nil))
+      (assert (equal (bigger-rectangle? test-rectangle-bigger test-rectangle-smaller) t))))
+
+  ;; (test-bigger-rectangle?)
+#+END_SRC
+
+*** START find-border-coordinates
+#+NAME: border_color
+#+BEGIN_SRC lisp :noweb yes
+  (defparameter *r-border* 12)
+  (defparameter *g-border* 30)
+  (defparameter *b-border* 54)
+
+  (defparameter *color-tolerance* 10)
+#+END_SRC
+
+Функция проверяет цвет конкетного пикселя в изображении с учетом
+возможной цветовой погрешности.
+#+NAME: needed_pix?
+#+BEGIN_SRC lisp :noweb yes
+  <<border_color>>
+
+  (defun needed-pix? (x y r g b array-png)
+    (let* ((max-array-y (- (array-dimension array-png 0) 1))
+           (max-array-x (- (array-dimension array-png 1) 1))
+           (if (or (< max-array-x x)
+                   (< max-array-y y)
+                   (< x 0)
+                   (< y 0))
+               nil
+               (and (or (= r (aref image y x 0))
+                        ( <= (abs (- r (aref image y x 0))) *color-tolerance*))
+                    (or (= g (aref image y x 1))
+                        ( <= (abs (- g (aref image y x 1))) *color-tolerance*))
+                    (or (= b (aref image y x 2))
+                        ( <= (abs (- b (aref image y x 2))) *color-tolerance*)))))))
+
+  <<find_border_coordinates>>
+#+END_SRC
+
+#+NAME: find_border_coordinates
+#+BEGIN_SRC lisp :noweb yes
+  (defun is-border? (x y max-y minimum-border-length array-png)
+    (do ((y y (incf y))
+         (border-length 0 (incf border-length)))
+        ((or (= y (+ minimum-border-length y))
+             (= y max-y)))
+      (if (not (needed-pix? x y *r-border* *g-border* *b-border* array-png))
+          (if (< border-length minimum-border-length)
+              (return nil)
+              (return t))))
+    (< border-length minimum-border-length))
+
+  (defun find-border-coordinates(array-png)
+    (let* ((max-array-y (- (array-dimension array-png 0) 1))
+           (max-array-x (- (array-dimension array-png 1) 1))
+           (minimum-border-length (* (floor (/ max-array-y 3))  2)))
+      (dotimes (y max-array-y)
+        (dotimes (x max-array-x)
+          (if (needed-pix? x y *r-border* *g-border* *b-border* array-png)
+              (if (is-border? x y max-array-y minimum-border-length array-png)
+                  (return (cons x y))))))))
+
+#+END_SRC
+
+** Запуск тестов
+Запускает все тесты
+#+NAME: run_tests
+#+BEGIN_SRC lisp :noweb yes
+  (defun run-tests()
+    (test-rectangle?)
+    (test-bigger-rectangle?))
+
+  ;; (run-tests)
+#+END_SRC
+
 ** Эмуляция нажатия клавиш и движения мышкой
 Честно стащено отсюда https://github.com/0xBECEDA/cl-dino/blob/master/cl-autogui.lisp
 
@@ -453,11 +607,15 @@ https://askubuntu.com/questions/1271281/dell-precision-7550-physical-mouse-butto
 * Tangle
    #+NAME: recognition
    #+BEGIN_SRC lisp :tangle code-file.lisp :noweb yes tangle :exports code :padline no :comments none
+     <<libraries>>
      <<define_displays>>
      <<define_coordinates>>
      <<png_preparing>>
+     <<is_it_rectangle>>
+     <<needed_pix?>>
      <<keyboard_simulation>>
      <<open_browser>>
+     <<run_tests>>
    #+END_SRC
 
 * Как это запустить

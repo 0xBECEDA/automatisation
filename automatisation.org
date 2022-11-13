@@ -16,7 +16,6 @@
     :Notices: some notices
     :END:
 
-
 * Company3
 :PROPERTIES:
     :Salary:  150

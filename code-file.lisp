@@ -1,6 +1,7 @@
 (ql:quickload "clx")
 (ql:quickload "zpng")
 (ql:quickload "png-read")
+(ql:quickload "local-time")
 
 (defmacro with-display (host (display screen root-window) &body body)
   `(let* ((,display (xlib:open-display ,host))
@@ -252,6 +253,109 @@
 ;;   (destructuring-bind (height width) ;; NB: no depth!
 ;;       (array-dimensions image-data)
 ;;     (save-png width height to image-data :grayscale)))
+(defun rectangle? (coordinates)
+  (if (or (atom coordinates)
+          (or (atom (car coordinates))
+              (atom (cdr coordinates))))
+      nil
+      (let* ((down-left-x (caar coordinates))
+             (down-left-y (cdar coordinates))
+             (upper-right-x (caadr coordinates))
+             (upper-right-y (cdadr coordinates))
+             (hight (- upper-right-y down-left-y))
+             (length (- upper-right-x down-left-x)))
+        ;; мы считаем прямоугольником только фигуру, у которой
+        ;; длина значительно (в 1.5) превышает высоту (но при этом не является
+        ;; горизонтальной линией)
+        (and (> hight 0) (> length (* hight 1.5))))))
+
+(defun test-rectangle?()
+  (let ((test-line (list (cons 1 1) (cons 1 100)))
+        (test-line2 (list (cons 1 1) (cons 100 1)))
+        (test-square (list (cons 1 1) (cons 10 10)))
+        (test-rectangle (list (cons 1 1) (cons 100 10))))
+    (assert (equal (rectangle? test-line) nil))
+    (assert (equal (rectangle? test-line2) nil))
+    (assert (equal (rectangle? test-square) nil))
+    (assert (equal (rectangle? (cons 1 2)) nil))
+    (assert (equal (rectangle? '()) nil))
+    (assert (equal (rectangle? nil) nil))
+    (assert (equal (rectangle? test-rectangle) t))))
+
+;; (test-rectangle?)
+
+
+(defun bigger-rectangle? (coordinates1 coordinates2)
+  (if (or (not (rectangle? coordinates1))
+          (not (rectangle? coordinates2)))
+      nil
+      (let* ((down-left-x1 (caar coordinates1))
+             (down-left-y1 (cdar coordinates1))
+             (upper-right-x1 (caadr coordinates1))
+             (upper-right-y1 (cdadr coordinates1))
+             (down-left-x2 (caar coordinates2))
+             (down-left-y2 (cdar coordinates2))
+             (upper-right-x2 (caadr coordinates2))
+             (upper-right-y2 (cdadr coordinates2))
+             (hight1 (- upper-right-y1 down-left-y1))
+             (length1 (- upper-right-x1 down-left-x1))
+             (hight2 (- upper-right-y2 down-left-y2))
+             (length2 (- upper-right-x2 down-left-x2)))
+        (> (* hight1 length1) (* hight2 length2)))))
+
+(defun test-bigger-rectangle?()
+  (let ((test-rectangle-bigger (list (cons 1 1) (cons 100 10)))
+        (test-rectangle-smaller (list (cons 1 1) (cons 50 10)))
+        (test-line (list (cons 1 1) (cons 1 100)))
+        (test-line2 (list (cons 1 1) (cons 100 1))))
+    (assert (equal (bigger-rectangle? test-rectangle-bigger test-line) nil))
+    (assert (equal (bigger-rectangle? test-rectangle-bigger test-line2) nil))
+    (assert (equal (bigger-rectangle? test-rectangle-smaller test-rectangle-bigger) nil))
+    (assert (equal (bigger-rectangle? test-rectangle-bigger test-rectangle-smaller) t))))
+
+;; (test-bigger-rectangle?)
+(defparameter *r-border* 12)
+(defparameter *g-border* 30)
+(defparameter *b-border* 54)
+
+(defparameter *color-tolerance* 10)
+
+(defun needed-pix? (x y r g b array-png)
+  (let* ((max-array-y (- (array-dimension array-png 0) 1))
+         (max-array-x (- (array-dimension array-png 1) 1))
+         (if (or (< max-array-x x)
+                 (< max-array-y y)
+                 (< x 0)
+                 (< y 0))
+             nil
+             (and (or (= r (aref image y x 0))
+                      ( <= (abs (- r (aref image y x 0))) *color-tolerance*))
+                  (or (= g (aref image y x 1))
+                      ( <= (abs (- g (aref image y x 1))) *color-tolerance*))
+                  (or (= b (aref image y x 2))
+                      ( <= (abs (- b (aref image y x 2))) *color-tolerance*)))))))
+
+(defun is-border? (x y max-y minimum-border-length array-png)
+  (do ((y y (incf y))
+       (border-length 0 (incf border-length)))
+      ((or (= y (+ minimum-border-length y))
+           (= y max-y)))
+    (if (not (needed-pix? x y *r-border* *g-border* *b-border* array-png))
+        (if (< border-length minimum-border-length)
+            (return nil)
+            (return t))))
+  (< border-length minimum-border-length))
+
+(defun find-border-coordinates(array-png)
+  (let* ((max-array-y (- (array-dimension array-png 0) 1))
+         (max-array-x (- (array-dimension array-png 1) 1))
+         (minimum-border-length (* (floor (/ max-array-y 3))  2)))
+    (dotimes (y max-array-y)
+      (dotimes (x max-array-x)
+        (if (needed-pix? x y *r-border* *g-border* *b-border* array-png)
+            (if (is-border? x y max-array-y minimum-border-length array-png)
+                (return (cons x y))))))))
+
 (defun mklist (obj)
   (if (and
        (listp obj)
@@ -320,6 +424,7 @@ body is called on each action."
   (def x-key-up nil)
   (def x-press '(t nil)))
 
+;; координаты иконки браузера у меня
 (defparameter *default-browser-x* 35)
 (defparameter *default-browser-y* 75)
 
@@ -331,4 +436,9 @@ body is called on each action."
 (defun open-browser()
   (x-click :x *default-browser-x* :y *default-browser-y*))
 
-(open-browser)
+;; (open-browser)
+(defun run-tests()
+  (test-rectangle?)
+  (test-bigger-rectangle?))
+
+;; (run-tests)
