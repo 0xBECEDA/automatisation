@@ -327,6 +327,254 @@
    явялется ли первый прямоугольник больше второго. Обе фигуры должны
    быть прямоугольниками.
 
+*** DONE recolor_picture
+Цель: закрасить на изображении все, что отличается цветом от заданного.
+#+NAME: border_color
+#+BEGIN_SRC lisp :noweb yes
+  (defparameter *r-border* 32)
+  (defparameter *g-border* 78)
+  (defparameter *b-border* 138)
+
+  (defparameter *color-tolerance* 0)
+#+END_SRC
+
+#+NAME: needed_pix?
+#+BEGIN_SRC lisp :noweb yes
+  <<border_color>>
+
+  ;; (defun needed-pix? (x y r g b array-png)
+  ;;   (let* ((max-array-y (- (array-dimension array-png 0) 1))
+  ;;          (max-array-x (- (array-dimension array-png 1) 1)))
+  ;;     (if (or (< max-array-x x)
+  ;;             (< max-array-y y)
+  ;;             (< x 0)
+  ;;             (< y 0))
+  ;;         nil
+  ;;         (and (or (= r (aref array-png y x 0))
+  ;;                  ( <= (abs (- r (aref array-png y x 0))) *color-tolerance*)
+  ;;                  ( <= (abs (- (aref array-png y x 0) r)) *color-tolerance*))
+  ;;              (or (= g (aref array-png y x 0))
+  ;;                  ( <= (abs (- g (aref array-png y x 0))) *color-tolerance*)
+  ;;                  ( <= (abs (- (aref array-png y x 0) g)) *color-tolerance*))
+  ;;              (or (= b (aref array-png y x 0))
+  ;;                  ( <= (abs (- b (aref array-png y x 0))) *color-tolerance*)
+  ;;                  ( <= (abs (- (aref array-png y x 0) b)) *color-tolerance*))))))
+
+  (defun needed-pix? (x y r g b array-png)
+    (let* ((max-array-y (- (array-dimension array-png 0) 1))
+           (max-array-x (- (array-dimension array-png 1) 1)))
+      (if (or (< max-array-x x)
+              (< max-array-y y)
+              (< x 0)
+              (< y 0))
+          nil
+          (and (= r (aref array-png y x 0))
+               (= g (aref array-png y x 1))
+               (= b (aref array-png y x 2))))))
+
+  (defun test-needed-pix? ()
+      (assert
+       (needed-pix?
+        691 151 *r-border* *g-border* *b-border*
+        (load-png
+         "test-images/test-recolor.png"))))
+
+  ;; (test-needed-pix?)
+
+  <<recolor_picture>>
+  <<find_border_coordinates>>
+#+END_SRC
+
+#+NAME: recolor_picture
+#+BEGIN_SRC lisp :noweb yes
+  (defun recolor-pix (r g b x y image)
+    (setf (aref image y x 0) r
+          (aref image y x 1) g
+          (aref image y x 2) b))
+
+  (defun recolor-picture (new-r new-g new-b image)
+    (let* ((max-array-y (array-dimension image 0))
+           (max-array-x (array-dimension image 1)))
+      (do ((x 0 (incf x))) ((= x max-array-x))
+        (do ((y 0 (incf y))) ((= y max-array-y))
+          (if (not (needed-pix? x y *r-border* *g-border* *b-border* image))
+              (recolor-pix new-r new-g new-b x y image))))
+      image))
+
+
+  (defun test-recolor-pisture (path-from path-to)
+    (let* ((image (load-png path-from))
+           (max-array-y (array-dimension image 0))
+           (max-array-x (array-dimension image 1)))
+      (save-png max-array-x max-array-y path-to (recolor-picture 0 0 0 image))))
+
+  ;; (test-recolor-pisture
+  ;;  "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolor.png"
+  ;;  "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolored.png")
+
+<<find_block>>
+#+END_SRC
+
+*** START find_block
+Ищет блоки заданного цвета и возвращает их координаты.
+
+#+NAME: find_block
+#+BEGIN_SRC lisp :noweb yes
+  ;; найти вертикальную линию - движемся сверху вниз
+  ;; возвращает координаты окончания линии или nil, если координаты начала и конца
+  ;; совпадают
+  (defun find-vertical-line-up-down (x y r g b image)
+    (let ((start-y y)
+          (max-array-y (array-dimension image 0)))
+      (do ((y (incf y) (incf y))) ((= y max-array-y))
+        (if (not (needed-pix? x y r g b image))
+            (if (not (= start-y (decf y)))
+                (return (cons x y))
+                (return nil))))
+      (cons x (decf max-array-y))))
+
+
+  ;; найти вертикальную линию - движемся снизу вверх
+  ;; возвращает координаты окончания линии или nil, если координаты начала и конца
+  ;; совпадают
+  (defun find-vertical-line-down-up (x y r g b image)
+    (let ((start-y y))
+      (do ((y y (decf y))) ((= y 0))
+        (if (not (needed-pix? x y r g b image))
+            (if (not (= start-y (incf y)))
+                (return (cons x y))
+                (return nil)))))
+    (cons x 0))
+
+
+  ;; найти горизонтальную линию - движемся слева направо
+  ;; возвращает координаты окончания линии или nil, если координаты начала и конца
+  ;; совпадают
+  (defun find-horizontal-line-left-right (x y r g b image)
+    (let ((start-x x)
+          (max-array-x (array-dimension image 1)))
+      (do ((x (incf x) (incf x))) ((= x max-array-x))
+        (if (not (needed-pix? x y r g b image))
+            (if (not (= start-x (decf x)))
+                (return (cons x y))
+                (return nil))))
+      (cons (decf max-array-x) y)))
+
+
+
+  ;; найти горизонтальную линию - движемся справа налево
+  ;; возвращает координаты окончания линии или nil, если координаты начала и конца
+  ;; совпадают
+  (defun find-horizontal-line-right-left (x y r g b image)
+    (let ((start-x x))
+      (do ((x x (decf x))) ((= x 0))
+        (if (not (needed-pix? x y r g b image))
+            (if (not (= start-x (incf x)))
+                (return (cons x y))
+                (return nil)))))
+    (cons 0 y))
+
+
+  ;; начальные координаты - нижний правый угол
+  (defun find-upper-right-rectangle-corner (x y r g b image)
+    (do ((y y (decf y))) ((= y 0))
+      (cond ((and
+              (not (needed-pix? x y r g b image))
+              (not (if (and (> x 0) (> y 0))
+                       (needed-pix? (- x 1) (- y 1) r g b image))))
+             (return nil))
+            ((and
+              (not (needed-pix? x y r g b image))
+              (if (and (> x 0) (> y 0))
+                  (needed-pix? (- x 1) (- y 1) r g b image)))
+             (return (cons (- x 1) y))))))
+
+  (defparameter *test-image-path* "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolored.png")
+
+  ;; success test
+  (defun test-success-find-upper-right-rectangle-corner
+      (x-start y-start
+       x-expected-end y-expected-end
+       r g b image)
+    (let ((coordinates (find-upper-right-rectangle-corner
+                        x-start y-start r g b image)))
+      (assert (and (= (car coordinates) x-expected-end)
+                   (= (cdr coordinates) y-expected-end)))))
+
+  ;; fail test
+  (defun test-fail-find-upper-right-rectangle-corner
+      (x-start y-start r g b image)
+    (let ((coordinates (find-upper-right-rectangle-corner
+                        x-start y-start r g b image)))
+      (assert (equal coordinates nil))))
+
+  ;; run all tests for find-upper-right-rectangle-corner
+  (defun tests-find-upper-right-rectangle-corner()
+    (let ((image (load-png *test-image-path*)))
+      ;; success
+      (test-success-find-upper-right-rectangle-corner
+       164 128 686 128 *r-border* *g-border* *b-border* image)
+      ;; fail - no corner found
+      (test-fail-find-upper-right-rectangle-corner
+       686 194 *r-border* *g-border* *b-border* image)
+      ;; fail - no corner found
+      (test-fail-find-upper-right-rectangle-corner
+       0 0 *r-border* *g-border* *b-border* image)))
+
+  ;; (tests-find-upper-right-rectangle-corner)
+
+  ;; начальные коорднаты - правый верхний угол
+  (defun find-right-bottom-rectangle-corner (x y r g b image)
+    (let* ((max-array-y (array-dimension image 0)))
+      ;; отсекаем случай, когда перед нами горизонтальная линия
+      ;; или одиочный пиксель
+      (if  (not (needed-pix? x (+ y 1) r g b image))
+           nil
+           (do ((y y (incf y))) ((= y max-array-y))
+             (cond ((and
+                     (not (needed-pix? x y r g b image))
+                     (not (if (and (> x 0) (> y 0))
+                              (needed-pix? (- x 1) (- y 1) r g b image))))
+                    (return nil))
+                   ((and (not (needed-pix? x y r g b image))
+                         (if (and (> x 0) (> y 0))
+                             (needed-pix? (- x 1) (- y 1) r g b image)))
+                    (return (cons x y))))))))
+
+
+  ;; success test
+  (defun test-success-find-upper-right-rectangle-corner
+      (x-start y-start
+       x-expected-end y-expected-end
+       r g b image)
+    (let ((coordinates (find-bottom-right-rectangle-corner
+                        x-start y-start r g b image)))
+      (assert (and (= (car coordinates) x-expected-end)
+                   (= (cdr coordinates) y-expected-end)))))
+
+  ;; fail test
+  (defun test-fail-find-bottom-right-rectangle-corner
+      (x-start y-start r g b image)
+    (let ((coordinates (find-bottom-right-rectangle-corner
+                        x-start y-start r g b image)))
+      (assert (equal coordinates nil))))
+
+  ;; run all tests for find-bottom-right-rectangle-corner
+  (defun tests-find-bottom-right-rectangle-corner()
+    (let ((image (load-png *test-image-path*)))
+      ;; success
+      (test-success-find-bottom-right-rectangle-corner
+       686 211 686 128 *r-border* *g-border* *b-border* image)
+      ;; fail - no corner found
+      (test-fail-find-bottom-right-rectangle-corner
+       686 128 *r-border* *g-border* *b-border* image)
+      ;; fail - no corner found
+      (test-fail-find-bottom-right-rectangle-corner
+       0 0 *r-border* *g-border* *b-border* image)))
+
+  (tests-find-bottom-right-rectangle-corner)
+#+END_SRC
+
 *** DONE rectangle?
 Предикат, определяющий, является ли область прямоугольником (на вход принимает координаты левого ниженго угла и правого верхнего)
 #+NAME: is_it_rectangle
@@ -404,38 +652,9 @@
 #+END_SRC
 
 *** START find-border-coordinates
-#+NAME: border_color
-#+BEGIN_SRC lisp :noweb yes
-  (defparameter *r-border* 12)
-  (defparameter *g-border* 30)
-  (defparameter *b-border* 54)
-
-  (defparameter *color-tolerance* 10)
-#+END_SRC
 
 Функция проверяет цвет конкетного пикселя в изображении с учетом
 возможной цветовой погрешности.
-#+NAME: needed_pix?
-#+BEGIN_SRC lisp :noweb yes
-  <<border_color>>
-
-  (defun needed-pix? (x y r g b array-png)
-    (let* ((max-array-y (- (array-dimension array-png 0) 1))
-           (max-array-x (- (array-dimension array-png 1) 1))
-           (if (or (< max-array-x x)
-                   (< max-array-y y)
-                   (< x 0)
-                   (< y 0))
-               nil
-               (and (or (= r (aref image y x 0))
-                        ( <= (abs (- r (aref image y x 0))) *color-tolerance*))
-                    (or (= g (aref image y x 1))
-                        ( <= (abs (- g (aref image y x 1))) *color-tolerance*))
-                    (or (= b (aref image y x 2))
-                        ( <= (abs (- b (aref image y x 2))) *color-tolerance*)))))))
-
-  <<find_border_coordinates>>
-#+END_SRC
 
 #+NAME: find_border_coordinates
 #+BEGIN_SRC lisp :noweb yes
