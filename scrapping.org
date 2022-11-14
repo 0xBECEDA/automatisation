@@ -387,39 +387,39 @@
 
 #+NAME: recolor_picture
 #+BEGIN_SRC lisp :noweb yes
-  (defun recolor-pix (r g b x y image)
-    (setf (aref image y x 0) r
-          (aref image y x 1) g
-          (aref image y x 2) b))
+    (defun recolor-pix (r g b x y image)
+      (setf (aref image y x 0) r
+            (aref image y x 1) g
+            (aref image y x 2) b))
 
-  (defun recolor-picture (new-r new-g new-b image)
-    (let* ((max-array-y (array-dimension image 0))
-           (max-array-x (array-dimension image 1)))
-      (do ((x 0 (incf x))) ((= x max-array-x))
-        (do ((y 0 (incf y))) ((= y max-array-y))
-          (if (not (needed-pix? x y *r-border* *g-border* *b-border* image))
-              (recolor-pix new-r new-g new-b x y image))))
-      image))
+    (defun recolor-picture (new-r new-g new-b image)
+      (let* ((max-array-y (array-dimension image 0))
+             (max-array-x (array-dimension image 1)))
+        (do ((x 0 (incf x))) ((= x max-array-x))
+          (do ((y 0 (incf y))) ((= y max-array-y))
+            (if (not (needed-pix? x y *r-border* *g-border* *b-border* image))
+                (recolor-pix new-r new-g new-b x y image))))
+        image))
 
 
-  (defun test-recolor-pisture (path-from path-to)
-    (let* ((image (load-png path-from))
-           (max-array-y (array-dimension image 0))
-           (max-array-x (array-dimension image 1)))
-      (save-png max-array-x max-array-y path-to (recolor-picture 0 0 0 image))))
+    (defun test-recolor-pisture (path-from path-to)
+      (let* ((image (load-png path-from))
+             (max-array-y (array-dimension image 0))
+             (max-array-x (array-dimension image 1)))
+        (save-png max-array-x max-array-y path-to (recolor-picture 0 0 0 image))))
 
-  ;; (test-recolor-pisture
-  ;;  "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolor.png"
-  ;;  "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolored.png")
+    ;; (test-recolor-pisture
+    ;;  "test-images/test-recolor.png"
+    ;;  "test-images/test-recolored.png")
 
-<<find_block>>
+  <<find_block>>
 #+END_SRC
 
 *** START find_block
 
 #+NAME: find_block
 #+BEGIN_SRC lisp :noweb yes
-  (defparameter *test-image-path* "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolored.png")
+  (defparameter *test-image-path* "test-images/test-recolored.png")
   (defparameter *test-image* (load-png *test-image-path*))
 
   ;; шаблоны тестов
@@ -658,26 +658,26 @@
 
 #+NAME: find_border_coordinates
 #+BEGIN_SRC lisp :noweb yes
-  (defun is-border? (x y max-y minimum-border-length array-png)
-    (do ((y y (incf y))
-         (border-length 0 (incf border-length)))
-        ((or (= y (+ minimum-border-length y))
-             (= y max-y)))
-      (if (not (needed-pix? x y *r-border* *g-border* *b-border* array-png))
-          (if (< border-length minimum-border-length)
-              (return nil)
-              (return t))))
-    (< border-length minimum-border-length))
+  ;; (defun is-border? (x y max-y minimum-border-length array-png)
+  ;;   (do ((y y (incf y))
+  ;;        (border-length 0 (incf border-length)))
+  ;;       ((or (= y (+ minimum-border-length y))
+  ;;            (= y max-y)))
+  ;;     (if (not (needed-pix? x y *r-border* *g-border* *b-border* array-png))
+  ;;         (if (< border-length minimum-border-length)
+  ;;             (return nil)
+  ;;             (return t))))
+  ;;   (< border-length minimum-border-length))
 
-  (defun find-border-coordinates(array-png)
-    (let* ((max-array-y (- (array-dimension array-png 0) 1))
-           (max-array-x (- (array-dimension array-png 1) 1))
-           (minimum-border-length (* (floor (/ max-array-y 3))  2)))
-      (dotimes (y max-array-y)
-        (dotimes (x max-array-x)
-          (if (needed-pix? x y *r-border* *g-border* *b-border* array-png)
-              (if (is-border? x y max-array-y minimum-border-length array-png)
-                  (return (cons x y))))))))
+  ;; (defun find-border-coordinates(array-png)
+  ;;   (let* ((max-array-y (- (array-dimension array-png 0) 1))
+  ;;          (max-array-x (- (array-dimension array-png 1) 1))
+  ;;          (minimum-border-length (* (floor (/ max-array-y 3))  2)))
+  ;;     (dotimes (y max-array-y)
+  ;;       (dotimes (x max-array-x)
+  ;;         (if (needed-pix? x y *r-border* *g-border* *b-border* array-png)
+  ;;             (if (is-border? x y max-array-y minimum-border-length array-png)
+  ;;                 (return (cons x y))))))))
 
 #+END_SRC
 
