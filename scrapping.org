@@ -416,36 +416,86 @@
 #+END_SRC
 
 *** START find_block
-Ищет блоки заданного цвета и возвращает их координаты.
 
 #+NAME: find_block
 #+BEGIN_SRC lisp :noweb yes
+  (defparameter *test-image-path* "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolored.png")
+  (defparameter *test-image* (load-png *test-image-path*))
+
+  ;; шаблоны тестов
+  (defun test-success-find-line
+      (fn x-start y-start x-expected-end y-expected-end r g b image)
+    (let ((coordinates (apply fn (list x-start y-start r g b image))))
+      (assert (and (= (car coordinates) x-expected-end)
+                   (= (cdr coordinates) y-expected-end)))))
+
+  (defun test-fail-find-line
+      (fn x-start y-start r g b image)
+    (let ((coordinates (apply fn (list x-start y-start r g b image))))
+      (assert (equal coordinates '()))))
+
+
   ;; найти вертикальную линию - движемся сверху вниз
   ;; возвращает координаты окончания линии или nil, если координаты начала и конца
   ;; совпадают
   (defun find-vertical-line-up-down (x y r g b image)
     (let ((start-y y)
           (max-array-y (array-dimension image 0)))
-      (do ((y (incf y) (incf y))) ((= y max-array-y))
+      (do ((y (incf y) (incf y))) ((= y max-array-y) (cons x (decf max-array-y)))
         (if (not (needed-pix? x y r g b image))
             (if (not (= start-y (decf y)))
                 (return (cons x y))
-                (return nil))))
-      (cons x (decf max-array-y))))
+                (return nil))))))
 
+  ;; (test-success-find-line
+  ;;  'find-vertical-line-up-down
+  ;;  145 187 145 220
+  ;;  *r-border* *g-border* *b-border*
+  ;;  (load-png *test-image-path*))
+
+  ;; (test-fail-find-line
+  ;;  'find-vertical-line-up-down 143 187
+  ;;  *r-border* *g-border* *b-border*
+  ;;  (load-png *test-image-path*))
+
+  ;; (test-fail-find-line
+  ;;  'find-vertical-line-up-down 0 0
+  ;;  *r-border* *g-border* *b-border*
+  ;;  (load-png *test-image-path*))
+
+  ;; (test-fail-find-line
+  ;;  'find-vertical-line-up-down
+  ;;  (array-dimension *test-image* 1) (array-dimension *test-image* 0)
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
 
   ;; найти вертикальную линию - движемся снизу вверх
   ;; возвращает координаты окончания линии или nil, если координаты начала и конца
   ;; совпадают
   (defun find-vertical-line-down-up (x y r g b image)
     (let ((start-y y))
-      (do ((y y (decf y))) ((= y 0))
+      (do ((y y (decf y))) ((= y 0) (if (= y start-y) nil (cons x 0)))
         (if (not (needed-pix? x y r g b image))
             (if (not (= start-y (incf y)))
                 (return (cons x y))
-                (return nil)))))
-    (cons x 0))
+                (return nil))))))
 
+
+  ;; (test-success-find-line
+  ;;  'find-vertical-line-down-up
+  ;;  145 220 145 187
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
+
+  ;; (test-fail-find-line
+  ;;  'find-vertical-line-down-up 143 187
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
+
+  ;; (test-fail-find-line
+  ;;  'find-vertical-line-down-up 0 0
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
 
   ;; найти горизонтальную линию - движемся слева направо
   ;; возвращает координаты окончания линии или nil, если координаты начала и конца
@@ -453,126 +503,76 @@
   (defun find-horizontal-line-left-right (x y r g b image)
     (let ((start-x x)
           (max-array-x (array-dimension image 1)))
-      (do ((x (incf x) (incf x))) ((= x max-array-x))
+      (do ((x (incf x) (incf x))) ((= x max-array-x) (cons (decf max-array-x) y))
         (if (not (needed-pix? x y r g b image))
             (if (not (= start-x (decf x)))
                 (return (cons x y))
-                (return nil))))
-      (cons (decf max-array-x) y)))
+                (return nil))))))
 
+  ;; (test-success-find-line
+  ;;  'find-horizontal-line-left-right
+  ;;  164 354 686 354
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
 
+  ;; (test-fail-find-line
+  ;;  'find-horizontal-line-left-right 0 0
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
 
   ;; найти горизонтальную линию - движемся справа налево
   ;; возвращает координаты окончания линии или nil, если координаты начала и конца
   ;; совпадают
   (defun find-horizontal-line-right-left (x y r g b image)
     (let ((start-x x))
-      (do ((x x (decf x))) ((= x 0))
+      (do ((x x (decf x))) ((= x 0) (cons 0 y))
         (if (not (needed-pix? x y r g b image))
             (if (not (= start-x (incf x)))
                 (return (cons x y))
-                (return nil)))))
-    (cons 0 y))
+                (return nil))))))
 
 
-  ;; начальные координаты - нижний правый угол
-  (defun find-upper-right-rectangle-corner (x y r g b image)
-    (do ((y y (decf y))) ((= y 0))
-      (cond ((and
-              (not (needed-pix? x y r g b image))
-              (not (if (and (> x 0) (> y 0))
-                       (needed-pix? (- x 1) (- y 1) r g b image))))
-             (return nil))
-            ((and
-              (not (needed-pix? x y r g b image))
-              (if (and (> x 0) (> y 0))
-                  (needed-pix? (- x 1) (- y 1) r g b image)))
-             (return (cons (- x 1) y))))))
+  ;; (test-success-find-line
+  ;;  'find-horizontal-line-right-left
+  ;;  686 354  164 354
+  ;;  *r-border* *g-border* *b-border*
+  ;;  (load-png *test-image-path*))
 
-  (defparameter *test-image-path* "/home/ss/Documents/планы/jobs/automatisation/test-images/test-recolored.png")
+  ;; (test-fail-find-line
+  ;;  'find-horizontal-line-right-left
+  ;;  164 354
+  ;;  *r-border* *g-border* *b-border*
+  ;;  *test-image*)
 
-  ;; success test
-  (defun test-success-find-upper-right-rectangle-corner
-      (x-start y-start
-       x-expected-end y-expected-end
-       r g b image)
-    (let ((coordinates (find-upper-right-rectangle-corner
-                        x-start y-start r g b image)))
-      (assert (and (= (car coordinates) x-expected-end)
-                   (= (cdr coordinates) y-expected-end)))))
+  ;; возвращает координаты левого ниженго угла и правого верхнего
+  ;; либо nil
 
-  ;; fail test
-  (defun test-fail-find-upper-right-rectangle-corner
-      (x-start y-start r g b image)
-    (let ((coordinates (find-upper-right-rectangle-corner
-                        x-start y-start r g b image)))
-      (assert (equal coordinates nil))))
-
-  ;; run all tests for find-upper-right-rectangle-corner
-  (defun tests-find-upper-right-rectangle-corner()
-    (let ((image (load-png *test-image-path*)))
-      ;; success
-      (test-success-find-upper-right-rectangle-corner
-       164 128 686 128 *r-border* *g-border* *b-border* image)
-      ;; fail - no corner found
-      (test-fail-find-upper-right-rectangle-corner
-       686 194 *r-border* *g-border* *b-border* image)
-      ;; fail - no corner found
-      (test-fail-find-upper-right-rectangle-corner
-       0 0 *r-border* *g-border* *b-border* image)))
-
-  ;; (tests-find-upper-right-rectangle-corner)
-
-  ;; начальные коорднаты - правый верхний угол
-  (defun find-right-bottom-rectangle-corner (x y r g b image)
-    (let* ((max-array-y (array-dimension image 0)))
-      ;; отсекаем случай, когда перед нами горизонтальная линия
-      ;; или одиочный пиксель
-      (if  (not (needed-pix? x (+ y 1) r g b image))
-           nil
-           (do ((y y (incf y))) ((= y max-array-y))
-             (cond ((and
-                     (not (needed-pix? x y r g b image))
-                     (not (if (and (> x 0) (> y 0))
-                              (needed-pix? (- x 1) (- y 1) r g b image))))
-                    (return nil))
-                   ((and (not (needed-pix? x y r g b image))
-                         (if (and (> x 0) (> y 0))
-                             (needed-pix? (- x 1) (- y 1) r g b image)))
-                    (return (cons x y))))))))
+  ;;TODO не учитывает, что подсказка триангла может накладываться на блок
+  (defun find-block (x y r g b image)
+    (let* ((left-bottom-corner (find-vertical-line-up-down x y r g b image))
+           (right-bottom-corner
+             (if (not (null left-bottom-corner))
+                 (find-horizontal-line-left-right
+                  (car left-bottom-corner) (cdr left-bottom-corner) r g b image)))
+           (right-upper-corner
+             (if (not (null right-bottom-corner))
+                 (find-vertical-line-down-up
+                  (car right-bottom-corner) (cdr right-bottom-corner) r g b image))))
+      (if (and (not (null left-bottom-corner))
+               (not (null right-upper-corner)))
+          (list left-bottom-corner right-upper-corner))))
 
 
-  ;; success test
-  (defun test-success-find-upper-right-rectangle-corner
-      (x-start y-start
-       x-expected-end y-expected-end
-       r g b image)
-    (let ((coordinates (find-bottom-right-rectangle-corner
-                        x-start y-start r g b image)))
-      (assert (and (= (car coordinates) x-expected-end)
-                   (= (cdr coordinates) y-expected-end)))))
+  (defun test-success-find-block()
+    (let* ((coordinates (find-block 48 186 *r-border* *g-border* *b-border* *test-image*))
+           (left-bottom-corner (car coordinates))
+           (right-upper-corner (cadr coordinates)))
+      (assert (and ( = (car left-bottom-corner) 48)
+                   ( = (cdr left-bottom-corner) 220)
+                   ( = (car right-upper-corner) 145)
+                   ( = (cdr right-upper-corner) 187)))))
 
-  ;; fail test
-  (defun test-fail-find-bottom-right-rectangle-corner
-      (x-start y-start r g b image)
-    (let ((coordinates (find-bottom-right-rectangle-corner
-                        x-start y-start r g b image)))
-      (assert (equal coordinates nil))))
-
-  ;; run all tests for find-bottom-right-rectangle-corner
-  (defun tests-find-bottom-right-rectangle-corner()
-    (let ((image (load-png *test-image-path*)))
-      ;; success
-      (test-success-find-bottom-right-rectangle-corner
-       686 211 686 128 *r-border* *g-border* *b-border* image)
-      ;; fail - no corner found
-      (test-fail-find-bottom-right-rectangle-corner
-       686 128 *r-border* *g-border* *b-border* image)
-      ;; fail - no corner found
-      (test-fail-find-bottom-right-rectangle-corner
-       0 0 *r-border* *g-border* *b-border* image)))
-
-  (tests-find-bottom-right-rectangle-corner)
+  ;; (test-success-find-block)
 #+END_SRC
 
 *** DONE rectangle?
