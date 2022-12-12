@@ -290,7 +290,7 @@
 #+END_SRC
 
 ** START Сегментация
-Известно, что:
+   Известно, что:
 - подсказки тридактила - это всегда квадратики с офоном определнного
   цвета и двумя белыми буквами на нем
 
@@ -335,51 +335,42 @@
   (defparameter *g-border* 78)
   (defparameter *b-border* 138)
 
-  (defparameter *color-tolerance* 0)
+  (defparameter *color-tolerance* 10)
 #+END_SRC
 
 #+NAME: needed_pix?
 #+BEGIN_SRC lisp :noweb yes
   <<border_color>>
 
-  ;; (defun needed-pix? (x y r g b array-png)
-  ;;   (let* ((max-array-y (- (array-dimension array-png 0) 1))
-  ;;          (max-array-x (- (array-dimension array-png 1) 1)))
-  ;;     (if (or (< max-array-x x)
-  ;;             (< max-array-y y)
-  ;;             (< x 0)
-  ;;             (< y 0))
-  ;;         nil
-  ;;         (and (or (= r (aref array-png y x 0))
-  ;;                  ( <= (abs (- r (aref array-png y x 0))) *color-tolerance*)
-  ;;                  ( <= (abs (- (aref array-png y x 0) r)) *color-tolerance*))
-  ;;              (or (= g (aref array-png y x 0))
-  ;;                  ( <= (abs (- g (aref array-png y x 0))) *color-tolerance*)
-  ;;                  ( <= (abs (- (aref array-png y x 0) g)) *color-tolerance*))
-  ;;              (or (= b (aref array-png y x 0))
-  ;;                  ( <= (abs (- b (aref array-png y x 0))) *color-tolerance*)
-  ;;                  ( <= (abs (- (aref array-png y x 0) b)) *color-tolerance*))))))
-
   (defun needed-pix? (x y r g b array-png)
     (let* ((max-array-y (- (array-dimension array-png 0) 1))
-           (max-array-x (- (array-dimension array-png 1) 1)))
+           (max-array-x (- (array-dimension array-png 1) 1))
+           (r-array-color (aref array-png y x 0))
+           (g-array-color (aref array-png y x 1))
+           (b-array-color (aref array-png y x 2)))
       (if (or (< max-array-x x)
               (< max-array-y y)
               (< x 0)
               (< y 0))
           nil
-          (and (= r (aref array-png y x 0))
-               (= g (aref array-png y x 1))
-               (= b (aref array-png y x 2))))))
+          (progn
+            ;; (format t "r-array-color ~A g-array-color ~A b-array-color ~A ~%"
+            ;;         r-array-color g-array-color b-array-color)
+          (and (or (= r r-array-color)
+                   (<= (abs (- r r-array-color)) *color-tolerance*))
+               (or (= g g-array-color)
+                   (<= (abs (- g g-array-color)) *color-tolerance*))
+               (or (= b b-array-color)
+                   (<= (abs (- b b-array-color)) *color-tolerance*)))))))
 
-  (defun test-needed-pix? ()
+  (defun test-needed-pix?()
       (assert
        (needed-pix?
         691 151 *r-border* *g-border* *b-border*
         (load-png
          "test-images/test-recolor.png"))))
 
-  ;; (test-needed-pix?)
+  ;;(test-needed-pix?)
 
   <<recolor_picture>>
   <<find_border_coordinates>>
@@ -400,7 +391,6 @@
             (if (not (needed-pix? x y *r-border* *g-border* *b-border* image))
                 (recolor-pix new-r new-g new-b x y image))))
         image))
-
 
     (defun test-recolor-pisture (path-from path-to)
       (let* ((image (load-png path-from))
@@ -444,7 +434,9 @@
       (do ((y (incf y) (incf y))) ((= y max-array-y) (cons x (decf max-array-y)))
         (if (not (needed-pix? x y r g b image))
             (if (not (= start-y (decf y)))
-                (return (cons x y))
+                (progn
+                  ;; (format t "x ~A start-y ~A y-end ~A ~%" start-y y x)
+                  (return (cons x y)))
                 (return nil))))))
 
   ;; (test-success-find-line
@@ -452,6 +444,12 @@
   ;;  145 187 145 220
   ;;  *r-border* *g-border* *b-border*
   ;;  (load-png *test-image-path*))
+
+  ;; (test-success-find-line
+  ;;  'find-vertical-line-up-down
+  ;;  906 328 906 1079
+  ;;  *r-border* *g-border* *b-border*
+  ;;  (load-png *test-full-image-path*))
 
   ;; (test-fail-find-line
   ;;  'find-vertical-line-up-down 143 187
@@ -572,7 +570,129 @@
                    ( = (car right-upper-corner) 145)
                    ( = (cdr right-upper-corner) 187)))))
 
-  ;; (test-success-find-block)
+  ;;(test-success-find-block)
+
+  <<belongs_to_block>>
+#+END_SRC
+
+**** TODO Алгоритм по поиску всех блоков.
+
+Главная идея:
+- идем по изображению сверху вниз слева-направо
+- если наткнулись на цвет рамок триангла, то проверяем, не блок ли это
+- если блок, то сохраняем его координаты и идем далье
+
+1. В какой структуре хранить блоки?
+
+2. При  описанном алгоритме одни и те же блоки будут найдены n
+   раз. Следовательно, надо реализовать механизм, при котором
+   распознавание блока будет включаться только в том случае, если
+   найденный пиксель не принадлежит ни к одному из известных блоков.
+
+3. Отсюда возникает вопрос: как быстро проверить, принадлежит ли пиксель
+   блоку?
+
+
+Предикаты, которые позволяют определить, принадлежит ли заданный пиксель
+к уже найденным границам блока
+#+NAME: belongs_to_block
+#+BEGIN_SRC lisp :noweb yes
+  ;; Проверяет, что заданный пиксель находится на заданной вертикальной
+  ;; или горизонтальной линии
+  ;; Линии могут быть заданы слева направо, справа налево, сверху вниз
+  ;; или снизу вверх
+  (defun pixel-on-the-line? (pixel-x pixel-y line-coordinates)
+    (let* ((line-start (car line-coordinates))
+           (line-end (cadr line-coordinates))
+           (line-start-x (car line-start))
+           (line-start-y (cdr line-start))
+           (line-end-x (car line-end))
+           (line-end-y (cdr line-end)))
+      ;; заданная линия вертикальная
+      (cond ((= line-start-x line-end-x)
+             ;; пиксель лежит на той же оси X, что и линия
+             (if ( = pixel-x line-start-x)
+                 ;; линия задана снизу вверх
+                 (cond ((> line-start-y line-end-y)
+                        (and (<= pixel-y line-start-y)
+                             (>= pixel-y line-end-y)))
+                       ;; линия задана cверху вниз
+                       ((< line-start-y line-end-y)
+                        (and (>= pixel-y line-start-y)
+                             (<= pixel-y line-end-y))))))
+            ;; заданная линия горизонтальная
+            ((= line-start-y line-end-y)
+             ;; пиксель лежит на той же оси Y, что и линия
+             (if ( = pixel-y line-start-y)
+                 ;; линия задана слева направо
+                 (cond ((> line-start-x line-end-x)
+                        (and (<= pixel-x line-start-x)
+                             (>= pixel-x line-end-x)))
+                       ;; линия задана справа налево
+                       ((< line-start-x line-end-x)
+                        (and (>= pixel-x line-start-x)
+                             (<= pixel-x line-end-x)))))))))
+
+  (defun test-pixel-on-the-line()
+    ;; fail - лежит на той же оси X, но не лежит на оси Y
+    (assert (equal nil (pixel-on-the-line? 1 5 (list (cons 1 10)
+                                                     (cons 1 20)))))
+    ;; fail - не лежит на оси X
+    (assert (equal nil (pixel-on-the-line? 2 5 (list (cons 1 10)
+                                                   (cons 1 20)))))
+    ;; success - лежит на оси X
+    (assert (equal t (pixel-on-the-line? 2 10 (list (cons 2 10)
+                                                    (cons 20 10)))))
+    ;; success - лежит на оси Y
+    (assert (equal t (pixel-on-the-line? 2 10 (list (cons 2 10)
+                                                    (cons 2 20))))))
+
+  ;; (test-pixel-on-the-line)
+
+  ;; принимает кооррдинаты левого нижнего и верхнего правого углов блока
+  ;; и на их основе высчитывает правый нижний и верхний левый углы
+  ;; возвращает углы в порядке:
+  ;; - левый верхний
+  ;; - левый нижний
+  ;; - правый верхний
+  ;; - правый нижний
+  (defun calculate-all-block-corners (coordinates)
+    (let* ((left-bottom-corner (car coordinates))
+           (right-upper-corner (cadr coordinates))
+           (right-bottom-corner (cons (car right-upper-corner)
+                                      (cdr left-bottom-corner)))
+           (left-upper-corner (cons (car left-bottom-corner)
+                                    (cdr right-upper-corner))))
+      (values left-upper-corner left-bottom-corner right-upper-corner right-bottom-corner)))
+
+  ;; (calculate-all-block-corners (find-block 48 186 *r-border* *g-border* *b-border* *test-image*)) =>
+  ;; (48 . 187), (48 . 220), (145 . 187), (145 . 220)
+
+  ;; проверяет, принаджедит ли пиксель к уже найденным границам блока
+  (defun belongs-to-block? (pixel-x pixel-y block-coordinates)
+    (multiple-value-bind
+          (left-upper-corner left-bottom-corner right-upper-corner right-bottom-corner)
+        (calculate-all-block-corners block-coordinates)
+      (cond ((pixel-on-the-line? pixel-x pixel-y (list left-upper-corner left-bottom-corner))
+             t)
+            ((pixel-on-the-line? pixel-x pixel-y (list left-upper-corner right-upper-corner))
+             t)
+            ((pixel-on-the-line? pixel-x pixel-y (list left-bottom-corner right-bottom-corner))
+             t)
+            ((pixel-on-the-line? pixel-x pixel-y (list right-bottom-corner right-upper-corner))
+             t))))
+
+  (defun test-success-belongs-to-block()
+    (assert (equal t (belongs-to-block? 48 188
+                               (find-block 48 186 *r-border* *g-border* *b-border* *test-image*)))))
+
+  ;; (test-success-belongs-to-block)
+#+END_SRC
+
+
+#+NAME: find_block_2
+#+BEGIN_SRC lisp :noweb yes
+
 #+END_SRC
 
 *** DONE rectangle?
@@ -651,33 +771,37 @@
   ;; (test-bigger-rectangle?)
 #+END_SRC
 
-*** START find-border-coordinates
+*** DONE find-border-coordinates
 
-Функция проверяет цвет конкетного пикселя в изображении с учетом
-возможной цветовой погрешности.
+Поиск границы, разделительной границы, которая проходит сверху вниз
+экрана и по длине составляется примерно 2/3 высоты экрана.
 
 #+NAME: find_border_coordinates
 #+BEGIN_SRC lisp :noweb yes
-  ;; (defun is-border? (x y max-y minimum-border-length array-png)
-  ;;   (do ((y y (incf y))
-  ;;        (border-length 0 (incf border-length)))
-  ;;       ((or (= y (+ minimum-border-length y))
-  ;;            (= y max-y)))
-  ;;     (if (not (needed-pix? x y *r-border* *g-border* *b-border* array-png))
-  ;;         (if (< border-length minimum-border-length)
-  ;;             (return nil)
-  ;;             (return t))))
-  ;;   (< border-length minimum-border-length))
+  (defun find-border-coordinates (r g b array-png)
+    (let* ((max-array-y (- (array-dimension array-png 0) 1))
+           (max-array-x (- (array-dimension array-png 1) 1))
+           (minimum-border-length (* (floor (/ max-array-y 3))  2)))
+      ;; (format t "minimum-border-length ~A ~%" minimum-border-length)
+      (do ((y 0 (incf y))) ((= y max-array-y))
+        (do ((x 0 (incf x))) ((= x max-array-x))
+          (if (needed-pix? x y r g b array-png)
+              (let ((line (find-vertical-line-up-down x y r g b array-png)))
+                (if (and (not (null line))
+                         (>= (- (cdr line) y) minimum-border-length))
+                           (return-from  find-border-coordinates
+                             (list (cons x y) line)))))))))
 
-  ;; (defun find-border-coordinates(array-png)
-  ;;   (let* ((max-array-y (- (array-dimension array-png 0) 1))
-  ;;          (max-array-x (- (array-dimension array-png 1) 1))
-  ;;          (minimum-border-length (* (floor (/ max-array-y 3))  2)))
-  ;;     (dotimes (y max-array-y)
-  ;;       (dotimes (x max-array-x)
-  ;;         (if (needed-pix? x y *r-border* *g-border* *b-border* array-png)
-  ;;             (if (is-border? x y max-array-y minimum-border-length array-png)
-  ;;                 (return (cons x y))))))))
+
+  (defparameter *test-full-image-path* "test-images/full_image.png")
+  (defun test-success-find-border
+      (x-expected y-expected r g b image-path)
+    (let* ((image (load-png image-path))
+           (coordinates (find-border-coordinates r g b image)))
+      (assert (and (= (caar coordinates) x-expected)
+                   (= (cdadr coordinates) y-expected)))))
+
+  ;; (test-success-find-border 906 1079 *r-border* *g-border* *b-border* *test-full-image-path*)
 
 #+END_SRC
 
